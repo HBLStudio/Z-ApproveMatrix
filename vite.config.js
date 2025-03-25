@@ -8,5 +8,12 @@ export default defineConfig({
     host: '0.0.0.0',
     port: 3000,
     open: true,
+    proxy: {
+      '/feishu': {
+        target: `https://open.feishu.cn`,
+        changeOrigin: true,
+        rewrite: path => path.replace(/^\/feishu/, '')
+      }
+    }
   }
 })
