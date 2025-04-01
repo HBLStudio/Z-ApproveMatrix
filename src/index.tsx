@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import ReactDOM from 'react-dom/client';
 import { Button, Input, message, Form, Card, Select, Row, Col } from 'antd';
-import { getApprovalListByPhoneNumber, submitApproval } from './feishu-api';
+import { getApprovalListByID, submitApproval } from './feishu-api';
 import { bitable, IGridView } from '@lark-base-open/js-sdk';
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
@@ -9,6 +9,7 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
     <LoadApp />
   </React.StrictMode>
 );
+
 interface Field {
   id: string;
   name: string;
@@ -16,18 +17,23 @@ interface Field {
 }
 
 function LoadApp() {
-  const [phoneNumber, setPhoneNumber] = useState('');
-  const [isPhoneValid, setIsPhoneValid] = useState(true); // 追踪手机号是否有效
   const [approvalList, setApprovalList] = useState<any[]>([]); // 审批列表
   const [selectedApprovalCode, setSelectedApprovalCode] = useState<string>(''); // 存储选中的 approval code
   const [fieldMetaList, setFieldMetaList] = useState<any[]>([]); // 多维表格字段
   const [childrenFields, setChildrenFields] = useState<{ id: string; name: string }[]>([]); // 审批表单字段
   const [showFieldList, setShowFieldList] = useState(false); // 控制字段列表的显示
+  const [tableUserId, setTableUserId] = useState<any>(null); // 新增状态，存储 tableUserId
+  const [info,setInfo] = useState<any>(null);
 
   useEffect(() => {
     const fn = async () => {
       const table = await bitable.base.getActiveTable();
       const fieldMetaList = await table.getFieldMetaList();
+
+      const bridge = bitable.bridge;
+      const userId = await bridge.getUserId(); // 获取当前用户的 ID
+      setTableUserId(userId); // 更新 tableUserId
+
       // 筛选出 name 包含 "审批字段-" 的字段，并提取 id 和 name
       const filteredFields = fieldMetaList
         .filter(field => field.name.includes("审批字段-"))
@@ -44,20 +50,56 @@ function LoadApp() {
             )
           );
         })
-      })
+      });
     };
 
     fn();
   }, []);
 
-  // 处理手机号输入（仅允许数字）
-  const handlePhoneChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/\D/g, ''); // 只允许数字
-    setPhoneNumber(value);
-    setIsPhoneValid(value.length === 11); // 只有 11 位才是合法
+  const fetchApprovalList = async () => {
+    if (!tableUserId) {
+      message.warning('用户ID获取失败，请稍后重试');
+      return;
+    }
+    setInfo("获取审批列表中，请稍后...")
+    const approvalList = await getApprovalListByID(tableUserId);
+    setApprovalList(approvalList);
+    if(approvalList.length>0){
+      setInfo("获取审批列表成功")
+    }else{
+      setInfo("获取审批列表失败，请重试或联系管理员")
+    }
+  };
+  // 提交选中的审批
+  const handleSubmit = async () => {
+    const table = await bitable.base.getActiveTable();
+    const selection = await bitable.base.getSelection();
+    const activeView = (await table.getActiveView()) as unknown as IGridView;
+    const records = await activeView.getSelectedRecordIdList();
+
+    if (records.length === 0) {
+      message.warning('未选中任何记录');
+      return;
+    }
+
+    const params = new URLSearchParams({
+      approval_code: selectedApprovalCode,
+      app_id: selection.baseId?.toString() || '',
+      table_id: selection.tableId?.toString() || '',
+      record_id: records.toString(),
+      table_user_id: tableUserId,
+    });
+
+    const resp = submitApproval(params);
   };
 
-  // 提取选中审批的 children 字段
+  // 处理选择审批
+  const handleSelectChange = (code: string) => {
+    setSelectedApprovalCode(code);
+    extractChildrenFields(code);
+  };
+
+  // 提取选中的审批表单字段
   const extractChildrenFields = (code: string) => {
     const selectedApproval = approvalList.find((item) => item.code === code);
     if (!selectedApproval || !selectedApproval.form) {
@@ -68,9 +110,9 @@ function LoadApp() {
 
     try {
       const formArray = JSON.parse(selectedApproval.form); // 解析 form JSON
-      const filteredChildren = formArray.flatMap((field: any) => 
-        field.children && Array.isArray(field.children) 
-          ? field.children.map((child: any) => ({ id: child.id, name: child.name })) 
+      const filteredChildren = formArray.flatMap((field: any) =>
+        field.children && Array.isArray(field.children)
+          ? field.children.map((child: any) => ({ id: child.id, name: child.name }))
           : []
       );
       setChildrenFields(filteredChildren);
@@ -82,50 +124,6 @@ function LoadApp() {
     }
   };
 
-  // 提交请求
-  const handleQuery = async () => {
-    if (!isPhoneValid || phoneNumber.length !== 11) {
-      message.warning('请输入有效的 11 位手机号');
-      return;
-    }
-
-    // 获取审批列表
-    const approvalList = await getApprovalListByPhoneNumber(phoneNumber);
-
-    setApprovalList(approvalList);
-    message.info('查询成功')
-  };
-
-  const handleSubmit = async () => {
-    // 重新获取选中的记录
-    const table = await bitable.base.getActiveTable();
-    const selection = await bitable.base.getSelection();
-    const activeView = (await table.getActiveView()) as unknown as IGridView;
-    const records = await activeView.getSelectedRecordIdList();
-
-    if (records.length === 0) {
-      message.warning('未选中任何记录');
-      return;
-    }
-
-    // 构造 URL 参数
-    const params = new URLSearchParams({
-      approval_code: selectedApprovalCode,
-      app_id: selection.baseId?.toString() || '',
-      table_id: selection.tableId?.toString() || '',
-      record_id: records.toString(),
-      phone_number: phoneNumber, // 加入手机号参数
-    });
-
-    const resp = submitApproval(params);
-  };
-
-  // 选择下拉项时的处理
-  const handleSelectChange = (code: string) => {
-    setSelectedApprovalCode(code);
-    extractChildrenFields(code);
-  };
-
   // 匹配字段
   const matchFields = (): { tableField: any; approvalField: any }[] => {
     const matchedFields: { tableField: any; approvalField: any }[] = [];
@@ -133,10 +131,8 @@ function LoadApp() {
 
     fieldMetaList.forEach((field) => {
       let matched = false;
-      // 去除“审批字段-”前缀后再进行匹配
       const cleanedFieldName = field.name.replace('审批字段-', '').trim();
 
-      // 尝试与每个审批字段匹配
       childrenFields.forEach((child) => {
         if (cleanedFieldName === child.name) {
           matchedFields.push({ tableField: field, approvalField: child });
@@ -149,43 +145,41 @@ function LoadApp() {
       }
     });
 
-    // 按照匹配的字段排序，匹配的字段排在前面
     return [...matchedFields, ...unmatchedFields];
   };
 
   // 获取匹配的字段列表
   const matchedFields = matchFields();
 
+  // 跳转到指定网址
+  const handleRedirect = () => {
+    window.location.href = `https://gtech-gd.feishu.cn/share/base/form/shrcnUWQRowT63dfENiPOGhXKIh?prefill_多维表格USERID=${tableUserId}`;
+  };
+
   return (
     <div style={{ display: 'flex', justifyContent: 'center', background: '#f5f5f5', paddingTop: 20 }}>
       <Card title="表单" style={{ width: 600, padding: 16, borderRadius: 8, boxShadow: '0 2px 10px rgba(0, 0, 0, 0.1)' }}>
         <Form layout="vertical">
-          <Form.Item
-            label="您的飞书账号手机号（仅用于发起审批）"
-            validateStatus={isPhoneValid ? '' : 'error'}
-            help={isPhoneValid ? '' : '请输入 11 位数字手机号'}
-          >
-            <Input
-              placeholder="请输入您的飞书账号手机号"
-              value={phoneNumber}
-              onChange={handlePhoneChange}
-              maxLength={11} // 限制最多输入 11 位
-            />
-          </Form.Item>
-
-          <Button type="primary" onClick={handleQuery} block>
-            查询审批列表
+          <Button type="primary" onClick={fetchApprovalList} block>
+            查询审批
           </Button>
 
-          <Form.Item label="选择审批">
-            <Select onChange={handleSelectChange} placeholder="请选择审批">
-              {approvalList.map((approval) => (
-                <Select.Option key={approval.code} value={approval.code}>
-                  {approval.name}
-                </Select.Option>
-              ))}
-            </Select>
-          </Form.Item>
+          {info && (
+            <div style={{ textAlign: 'center', marginTop: 16 }}>
+              {info}
+            </div>
+          )}
+
+          {approvalList.length > 0 && (
+            <Form.Item label="选择审批">
+              <Select onChange={handleSelectChange} placeholder="请选择审批">
+                {approvalList.map((approval) => (
+                  <Select.Option key={approval.code} value={approval.code}>
+                    {approval.name}
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>)}
 
           {showFieldList && (
             <Form.Item label="字段匹配">
@@ -214,6 +208,11 @@ function LoadApp() {
               提交审批
             </Button>
           )}
+
+
+          <div style={{ textAlign: 'center', marginTop: 16 }}>
+            首次使用请 <a onClick={handleRedirect} style={{ color: '#1890ff', cursor: 'pointer' }}>点击此处</a> 提交ID
+          </div>
         </Form>
       </Card>
     </div>

@@ -7,18 +7,18 @@ const apiClient = axios.create({
 });
 
 
-interface getApprovalListByPhoneNumberResponse {
+interface getApprovalListByIDResponse {
     code: number,
     approvalList: any,
 }
 
-export async function getApprovalListByPhoneNumber(phoneNumber: string): Promise<any[]> {
+export async function getApprovalListByID(tableUserId: string): Promise<any[]> {
     try {
         const queryParams = new URLSearchParams({
-            key: 'getApprovalListByPhoneNumber',
-            phoneNumber: phoneNumber, // 加入手机号参数
+            key: 'getApprovalListByID',
+            table_user_id: tableUserId, 
         });
-        const response = await apiClient.get<getApprovalListByPhoneNumberResponse>(
+        const response = await apiClient.get<getApprovalListByIDResponse>(
             `/anycross/trigger/callback/MDJmYWJhYTcwYjc1YzA3Njk4MmUwZDIxODk0MGMyNjQ1?${queryParams}`
         );
         const approvalList = response.data.approvalList;
